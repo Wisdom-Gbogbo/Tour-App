@@ -21,7 +21,7 @@ def load_activities(path=DATA_PATH):
     activities = []
     ids_seen = []
     try:
-        with open(path, newline="", encoding="utf-8") as file:
+        with open(path, newline="", encoding="utf-8-sig") as file:  # utf-8-sig ignores the hidden marker some editors add
             for row in csv.DictReader(file):
                 activity = {
                     "activity_id": row["activity_id"].strip(),
@@ -192,4 +192,3 @@ if __name__ == "__main__":
         show_trip("Revise: 1 activity a day", 600, 1)
         show_trip("Infeasible: GHS 1", 1, 3)
         print("---", validate_preferences(activities, "Atlantis", 9, [], -5))
-

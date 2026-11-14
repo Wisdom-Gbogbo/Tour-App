@@ -1,22 +1,22 @@
-activity_id	destination	name	category	estimated_price_ghs	duration_hours
-ACC001	Accra	Kwame Nkrumah Mausoleum and Memorial Park guided visit	history	120	2
-ACC002	Accra	Jamestown heritage walking tour	history	150	3
-ACC003	Accra	Osu Castle history walk	history	130	2
-ACC004	Accra	W.E.B. Du Bois Centre visit	history	100	1.5
-ACC005	Accra	Makola Market food tasting walk	food	180	3
-ACC006	Accra	Cooking class: jollof and waakye	food	350	3
-ACC007	Accra	Osu street food evening tour	food	220	2.5
-ACC008	Accra	Accra Arts Centre craft workshop	arts	200	2
-ACC009	Accra	Kente weaving demonstration	culture	160	2
-ACC010	Accra	Traditional drumming and dance session	culture	250	2
-ACC011	Accra	Legon Botanical Gardens nature walk	nature	120	2
-ACC012	Accra	Meeting room talk: Ghana's road to independence	talks	150	1.5
-ACC013	Accra	Meeting room talk: Ga culture and traditions	talks	140	1
-KOF001	Koforidua	Bead market visit and bead-making workshop	arts	220	3
-KOF002	Koforidua	Boti Falls guided day trip	nature	400	4
-KOF003	Koforidua	Meeting room talk: the history of Krobo beads	talks	130	1
-VOL001	Volta	Wli Waterfalls guided hike	nature	500	4
-VOL002	Volta	Volta Lake boat cruise	nature	450	3.5
-VOL003	Volta	Ewe kente weaving village visit	culture	300	3
-ABU001	Aburi	Aburi Botanical Gardens guided tour	nature	180	2
-ABU002	Aburi	Woodcarving workshop	arts	260	2.5
+activity_id,destination,name,category,estimated_price_ghs,duration_hours
+ACC001,Accra,Kwame Nkrumah Mausoleum and Memorial Park guided visit,history,120,2
+ACC002,Accra,Jamestown heritage walking tour,history,150,3
+ACC003,Accra,Osu Castle history walk,history,130,2
+ACC004,Accra,W.E.B. Du Bois Centre visit,history,100,1.5
+ACC005,Accra,Makola Market food tasting walk,food,180,3
+ACC006,Accra,Cooking class: jollof and waakye,food,350,3
+ACC007,Accra,Osu street food evening tour,food,220,2.5
+ACC008,Accra,Accra Arts Centre craft workshop,arts,200,2
+ACC009,Accra,Kente weaving demonstration,culture,160,2
+ACC010,Accra,Traditional drumming and dance session,culture,250,2
+ACC011,Accra,Legon Botanical Gardens nature walk,nature,120,2
+ACC012,Accra,Meeting room talk: Ghana's road to independence,talks,150,1.5
+ACC013,Accra,Meeting room talk: Ga culture and traditions,talks,140,1
+KOF001,Koforidua,Bead market visit and bead-making workshop,arts,220,3
+KOF002,Koforidua,Boti Falls guided day trip,nature,400,4
+KOF003,Koforidua,Meeting room talk: the history of Krobo beads,talks,130,1
+VOL001,Volta,Wli Waterfalls guided hike,nature,500,4
+VOL002,Volta,Volta Lake boat cruise,nature,450,3.5
+VOL003,Volta,Ewe kente weaving village visit,culture,300,3
+ABU001,Aburi,Aburi Botanical Gardens guided tour,nature,180,2
+ABU002,Aburi,Woodcarving workshop,arts,260,2.5
