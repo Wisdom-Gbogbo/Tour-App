@@ -1,263 +1,195 @@
 """Core logic for the Trusted Tour Planner.
 
-Python owns the facts: catalogue lookups, costs, totals and limit checks.
-The AI only writes the wording around what these functions return.
+Python does the facts: the catalogue, prices, totals and limits.
 """
 
-from pathlib import Path
+import csv
 
-import pandas as pd
-
-DATA_PATH = Path("data/activities.csv")
-REQUIRED_COLUMNS = [
-    "activity_id",
-    "destination",
-    "name",
-    "category",
-    "estimated_price_ghs",
-    "duration_hours",
-]
+DATA_PATH = "data/activities.csv"
 CATEGORIES = ["history", "food", "culture", "nature", "arts", "talks"]
 
-DAILY_LIMIT_HOURS = 6   # maximum activity hours per day
+DAILY_LIMIT_HOURS = 6   # most activity hours allowed in one day
 MIN_DAYS = 1
 MAX_DAYS = 5
-DEFAULT_MAX_PER_DAY = 3  # lower this to ask for "fewer activities"
-MAX_BUDGET_GHS = 50000   # catches typos such as an extra zero
+MAX_PER_DAY = 3         # default; a lower number means "fewer activities"
+MAX_BUDGET = 50000      # catches typing mistakes such as an extra zero
 
 
-# ---------------------------------------------------------------------------
-# 1. Load the catalogue
-# ---------------------------------------------------------------------------
+# 1. Load the catalogue -----------------------------------------------------
 def load_activities(path=DATA_PATH):
-    """Read the curated catalogue and make sure it is clean and complete."""
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Activity catalogue not found at {path}. "
-            "Check that data/activities.csv exists."
-        )
+    """Read the CSV into a list of dictionaries. Returns (activities, error)."""
+    activities = []
+    ids_seen = []
     try:
-        df = pd.read_csv(path)
-    except Exception as exc:
-        raise ValueError(
-            "The activity catalogue could not be read. Check the CSV format."
-        ) from exc
+        with open(path, newline="", encoding="utf-8") as file:
+            for row in csv.DictReader(file):
+                activity = {
+                    "activity_id": row["activity_id"].strip(),
+                    "destination": row["destination"].strip(),
+                    "name": row["name"].strip(),
+                    "category": row["category"].strip().lower(),
+                    "estimated_price_ghs": float(row["estimated_price_ghs"]),
+                    "duration_hours": float(row["duration_hours"]),
+                }
+                if activity["activity_id"] in ids_seen:
+                    return [], "The catalogue has a duplicate activity ID."
+                if activity["estimated_price_ghs"] <= 0 or activity["duration_hours"] <= 0:
+                    return [], "Prices and durations in the catalogue must be above zero."
+                ids_seen.append(activity["activity_id"])
+                activities.append(activity)
+    except FileNotFoundError:
+        return [], "Activity catalogue not found. Check that data/activities.csv exists."
+    except (KeyError, ValueError):
+        return [], "The catalogue has a missing column or a non-numeric price or duration."
 
-    missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
-    if missing:
-        raise ValueError(f"The catalogue is missing columns: {', '.join(missing)}")
-
-    df = df[REQUIRED_COLUMNS].copy()
-    df["estimated_price_ghs"] = pd.to_numeric(df["estimated_price_ghs"], errors="coerce")
-    df["duration_hours"] = pd.to_numeric(df["duration_hours"], errors="coerce")
-    if df.isna().any().any():
-        raise ValueError("The catalogue has empty or non-numeric values. Check every row.")
-    if df["activity_id"].duplicated().any():
-        raise ValueError("The catalogue has duplicate activity IDs.")
-    if (df["estimated_price_ghs"] <= 0).any() or (df["duration_hours"] <= 0).any():
-        raise ValueError("Prices and durations in the catalogue must be above zero.")
-
-    df["destination"] = df["destination"].astype(str).str.strip()
-    df["category"] = df["category"].astype(str).str.strip().str.lower()
-    return df
+    if len(activities) == 0:
+        return [], "The catalogue is empty."
+    return activities, None
 
 
-# ---------------------------------------------------------------------------
-# 2. Validate the traveller's preferences
-# ---------------------------------------------------------------------------
+def get_destinations(activities):
+    """List each destination once, in alphabetical order."""
+    destinations = []
+    for activity in activities:
+        if activity["destination"] not in destinations:
+            destinations.append(activity["destination"])
+    return sorted(destinations)
+
+
+# 2. Validate the traveller's input -----------------------------------------
 def validate_preferences(activities, destination, days, interests, budget):
     """Return a list of error messages. An empty list means the input is valid."""
     errors = []
 
-    destinations = sorted(activities["destination"].unique())
-    if destination not in destinations:
-        errors.append(f"Choose a destination from the catalogue: {', '.join(destinations)}.")
-
-    if isinstance(days, bool) or not isinstance(days, int) or not MIN_DAYS <= days <= MAX_DAYS:
-        errors.append(f"Number of days must be a whole number from {MIN_DAYS} to {MAX_DAYS}.")
-
-    if not interests:
+    if destination not in get_destinations(activities):
+        errors.append("Choose a destination from the list.")
+    if type(days) != int or days < MIN_DAYS or days > MAX_DAYS:
+        errors.append(f"Days must be a whole number from {MIN_DAYS} to {MAX_DAYS}.")
+    if len(interests) == 0:
         errors.append("Pick at least one interest.")
-    elif any(i not in CATEGORIES for i in interests):
-        errors.append(f"Interests must come from: {', '.join(CATEGORIES)}.")
-
-    try:
-        budget_value = float(budget)
-        if not 0 < budget_value <= MAX_BUDGET_GHS:
-            errors.append(f"Budget must be more than GHS 0 and at most GHS {MAX_BUDGET_GHS:,}.")
-    except (TypeError, ValueError):
-        errors.append("Budget must be a number.")
+    for interest in interests:
+        if interest not in CATEGORIES:
+            errors.append(f"'{interest}' is not a valid interest.")
+    if type(budget) not in (int, float) or budget <= 0 or budget > MAX_BUDGET:
+        errors.append(f"Budget must be more than 0 and at most GHS {MAX_BUDGET:,}.")
 
     return errors
 
 
-# ---------------------------------------------------------------------------
-# 3. Filter the catalogue
-# ---------------------------------------------------------------------------
+# 3. Filter the catalogue ---------------------------------------------------
+def get_price(activity):
+    return activity["estimated_price_ghs"]
+
+
 def filter_activities(activities, destination, interests):
-    """Keep only catalogue activities in the destination and chosen categories."""
-    mask = (activities["destination"] == destination) & (
-        activities["category"].isin(interests)
-    )
-    return (
-        activities[mask]
-        .sort_values(["estimated_price_ghs", "duration_hours"])
-        .reset_index(drop=True)
-    )
+    """Keep activities in the destination that match an interest, cheapest first."""
+    matches = []
+    for activity in activities:
+        if activity["destination"] == destination and activity["category"] in interests:
+            matches.append(activity)
+    matches.sort(key=get_price)
+    return matches
 
 
-# ---------------------------------------------------------------------------
-# 4. Build the itinerary
-# ---------------------------------------------------------------------------
-def build_itinerary(
-    candidates,
-    days,
-    budget,
-    daily_limit=DAILY_LIMIT_HOURS,
-    max_per_day=DEFAULT_MAX_PER_DAY,
-):
-    """Spread catalogue activities over the days.
-
-    Returns a list with one entry per day; each entry is a list of activity dicts.
-    Activities are taken in turn from each category (cheapest first) so every
-    interest is represented, and each goes on the day with the most free time.
-    """
-    # One queue per category, cheapest first (candidates are already sorted by price)
-    queues = [
-        group.to_dict("records")
-        for _, group in candidates.groupby("category", sort=False)
-    ]
+# 4. Build the itinerary ----------------------------------------------------
+def build_itinerary(candidates, interests, days, budget, max_per_day=MAX_PER_DAY):
+    """Spread activities over the days. Returns a list with one list of activities per day."""
+    # Take the cheapest activity of each interest in turn, so every interest is included
     ordered = []
-    while any(queues):
-        for queue in queues:
-            if queue:
-                ordered.append(queue.pop(0))
+    for round_number in range(len(candidates)):
+        for interest in interests:
+            for activity in candidates:
+                if activity["category"] == interest and activity not in ordered:
+                    ordered.append(activity)
+                    break
 
-    plan = [[] for _ in range(days)]
-    hours = [0.0] * days
-    spent = 0.0
+    plan = []
+    hours = []
+    for day in range(days):
+        plan.append([])
+        hours.append(0)
 
+    spent = 0
     for activity in ordered:
         price = activity["estimated_price_ghs"]
         length = activity["duration_hours"]
-        if spent + price > budget or length > daily_limit:
-            continue
-        open_days = [
-            d for d in range(days)
-            if len(plan[d]) < max_per_day and hours[d] + length <= daily_limit
-        ]
-        if not open_days:
-            continue
-        day = min(open_days, key=lambda d: hours[d])
-        plan[day].append(activity)
-        hours[day] += length
-        spent += price
-
+        if spent + price <= budget and length <= DAILY_LIMIT_HOURS:
+            # Choose the day with the fewest hours that still has room
+            best_day = None
+            for day in range(days):
+                has_room = len(plan[day]) < max_per_day and hours[day] + length <= DAILY_LIMIT_HOURS
+                if has_room and (best_day is None or hours[day] < hours[best_day]):
+                    best_day = day
+            if best_day is not None:
+                plan[best_day].append(activity)
+                hours[best_day] += length
+                spent += price
     return plan
 
 
-# ---------------------------------------------------------------------------
-# 5. Cost and check the itinerary
-# ---------------------------------------------------------------------------
-def calculate_costs(plan, budget, daily_limit=DAILY_LIMIT_HOURS):
-    """Total each day and the whole trip, and check the budget and hour limit."""
-    day_summaries = []
-    for number, activities in enumerate(plan, start=1):
-        cost = sum(a["estimated_price_ghs"] for a in activities)
-        hours = sum(a["duration_hours"] for a in activities)
-        day_summaries.append(
-            {
-                "day": number,
-                "activity_ids": [a["activity_id"] for a in activities],
-                "cost_ghs": cost,
-                "hours": hours,
-                "within_limit": hours <= daily_limit,
-            }
-        )
-
-    total = sum(d["cost_ghs"] for d in day_summaries)
+# 5. Cost and check the itinerary -------------------------------------------
+def calculate_costs(plan, budget):
+    """Total each day and the whole trip, and check the budget and the daily hour limit."""
+    day_results = []
+    total = 0
+    for activities in plan:
+        cost = 0
+        hours = 0
+        for activity in activities:
+            cost += activity["estimated_price_ghs"]
+            hours += activity["duration_hours"]
+        day_results.append({"cost": cost, "hours": hours, "within_limit": hours <= DAILY_LIMIT_HOURS})
+        total += cost
     return {
-        "days": day_summaries,
-        "total_cost_ghs": total,
-        "budget_ghs": budget,
-        "remaining_ghs": budget - total,
+        "days": day_results,
+        "total": total,
+        "budget": budget,
+        "remaining": budget - total,
         "within_budget": total <= budget,
-        "daily_limit_hours": daily_limit,
-        "all_days_within_limit": all(d["within_limit"] for d in day_summaries),
     }
 
 
-# ---------------------------------------------------------------------------
-# 6. Explain an infeasible request
-# ---------------------------------------------------------------------------
-def explain_infeasible(candidates, destination, interests, budget,
-                       daily_limit=DAILY_LIMIT_HOURS):
-    """Give a clear reason when no plan can be built, without inventing activities."""
-    if candidates.empty:
-        return (
-            f"The catalogue has no {', '.join(interests)} activities in {destination}. "
-            "Try different interests or another destination."
-        )
-
-    usable = candidates[candidates["duration_hours"] <= daily_limit]
-    if usable.empty:
-        return (
-            f"Every matching activity is longer than the {daily_limit}-hour daily limit, "
-            "so none can be scheduled. Try different interests."
-        )
-
-    cheapest = usable.loc[usable["estimated_price_ghs"].idxmin()]
+# 6. Explain an impossible request ------------------------------------------
+def explain_infeasible(candidates, destination, interests, budget):
+    """Say clearly why no plan was possible, without inventing an activity."""
+    if len(candidates) == 0:
+        return f"The catalogue has no {', '.join(interests)} activities in {destination}. Try other interests."
+    cheapest = candidates[0]  # candidates are sorted cheapest first
     if budget < cheapest["estimated_price_ghs"]:
         return (
-            f"No plan is possible with a budget of GHS {budget:,.0f}. The cheapest matching "
-            f"activity in the catalogue is '{cheapest['name']}' at an estimated "
-            f"GHS {cheapest['estimated_price_ghs']:,.0f} per person. The catalogue has no "
-            "cheaper or free activities, and I will not invent one. "
-            "Try a higher budget."
+            f"No plan is possible with GHS {budget:,.0f}. The cheapest matching activity is "
+            f"'{cheapest['name']}' at an estimated GHS {cheapest['estimated_price_ghs']:,.0f} per person. "
+            "The catalogue has no free or cheaper activity, and I will not invent one."
         )
-
-    return (
-        "The matching activities could not be fitted within your days, budget and "
-        "daily limit. Try more days, a higher budget or more interests."
-    )
+    return "These activities could not fit your days and budget. Try more days or a higher budget."
 
 
-# ---------------------------------------------------------------------------
-# Quick self-test: run `python planner.py`
-# ---------------------------------------------------------------------------
+# Quick test: run `python planner.py` -----------------------------------------
 if __name__ == "__main__":
-    catalogue = load_activities()
-    print(f"Loaded {len(catalogue)} activities\n")
+    activities, error = load_activities()
+    if error:
+        print(error)
+    else:
+        interests = ["history", "food"]
+        candidates = filter_activities(activities, "Accra", interests)
 
-    def try_trip(destination, days, interests, budget, max_per_day=DEFAULT_MAX_PER_DAY):
-        errors = validate_preferences(catalogue, destination, days, interests, budget)
-        if errors:
-            print("Invalid input:", errors)
-            return
-        candidates = filter_activities(catalogue, destination, interests)
-        plan = build_itinerary(candidates, days, budget, max_per_day=max_per_day)
-        if not any(plan):
-            print(explain_infeasible(candidates, destination, interests, budget))
-            return
-        summary = calculate_costs(plan, budget)
-        for day, info in zip(plan, summary["days"]):
-            names = [a["name"] for a in day] or ["(no activities)"]
-            print(f"Day {info['day']}: {info['cost_ghs']:.0f} GHS, {info['hours']} h, "
-                  f"within limit: {info['within_limit']}")
-            for n in names:
-                print("   -", n)
-        print(f"Total: {summary['total_cost_ghs']:.0f} of {budget} GHS, "
-              f"within budget: {summary['within_budget']}")
+        def show_trip(title, budget, max_per_day):
+            print("---", title)
+            plan = build_itinerary(candidates, interests, 2, budget, max_per_day)
+            if plan[0] == [] and plan[1] == []:
+                print(explain_infeasible(candidates, "Accra", interests, budget))
+                return
+            costs = calculate_costs(plan, budget)
+            for number in range(len(plan)):
+                day = costs["days"][number]
+                print(f"Day {number + 1}: GHS {day['cost']:.0f}, {day['hours']} h, within limit: {day['within_limit']}")
+                for activity in plan[number]:
+                    print("   -", activity["name"])
+            print(f"Total GHS {costs['total']:.0f} of {budget}, within budget: {costs['within_budget']}")
 
-    print("--- Normal: 2 days Accra, history + food, GHS 600 ---")
-    try_trip("Accra", 2, ["history", "food"], 600)
-    print("\n--- Revision: same trip, GHS 300 ---")
-    try_trip("Accra", 2, ["history", "food"], 300)
-    print("\n--- Revision: fewer activities (max 1 per day) ---")
-    try_trip("Accra", 2, ["history", "food"], 600, max_per_day=1)
-    print("\n--- Infeasible: GHS 1 ---")
-    try_trip("Accra", 2, ["history", "food"], 1)
-    print("\n--- Invalid input ---")
-    try_trip("Atlantis", 9, [], -5)
+        show_trip("Normal: GHS 600", 600, 3)
+        show_trip("Revise: GHS 300", 300, 3)
+        show_trip("Revise: 1 activity a day", 600, 1)
+        show_trip("Infeasible: GHS 1", 1, 3)
+        print("---", validate_preferences(activities, "Atlantis", 9, [], -5))
 
